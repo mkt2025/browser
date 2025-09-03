@@ -1142,1126 +1142,1111 @@
     </div>
 
     <script>
-       // ===== STATE MANAGEMENT =====
-let tabs = [];
-let activeTabId = 0;
-let nextTabId = 1;
-let currentArea = null;
-let selectedArea = null;
-let topBarCollapsed = false;
+      // ===== STATE MANAGEMENT =====
+        let tabs = [];
+        let activeTabId = 0;
+        let nextTabId = 1;
+        let currentArea = null;
+        let selectedArea = null;
+        let topBarCollapsed = false;
 
-// ===== ENCRYPTED PIN DATA =====
-let encryptedAreaPins = {
-    'BALI': 'OTkx',     
-    'NTB': 'MzMx',      
-    'NTT': 'NjYx'       
-};
-
-// ===== SECURITY SYSTEM =====
-let loginAttempts = {};
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_TIME = 300000; // 5 menit
-const SESSION_TIMEOUT = 1800000; // 30 menit
-let sessionStartTime = null;
-let sessionChecker = null;
-
-// ===== NEW FUNCTIONS FOR TOGGLE AND COFFEE =====
-function toggleTopBar() {
-    const topBar = document.getElementById('topBar');
-    const toggleIcon = document.getElementById('toggleIcon');
-    
-    topBarCollapsed = !topBarCollapsed;
-    
-    if (topBarCollapsed) {
-        topBar.classList.add('collapsed');
-        toggleIcon.innerHTML = '<path d="M7 14l5-5 5 5z"/>';
-    } else {
-        topBar.classList.remove('collapsed');
-        toggleIcon.innerHTML = '<path d="M7 10l5 5 5-5z"/>';
-    }
-}
-
-function openBuyMeCoffee() {
-    // Tampilkan konfirmasi sebelum membuka link eksternal
-    const confirmOpen = confirm('Anda akan membuka halaman donasi di tab browser baru.\n\nLanjutkan?');
-    
-    if (confirmOpen) {
-        // Pilih salah satu platform donasi yang Anda gunakan:
-        
-        // Option 1: Buy Me a Coffee
-        const coffeeUrl = 'https://www.buymeacoffee.com/yourusername';
-        
-        // Option 2: Ko-fi (alternatif)
-        // const coffeeUrl = 'https://ko-fi.com/yourusername';
-        
-        // Option 3: PayPal Donation
-        // const coffeeUrl = 'https://www.paypal.com/donate/?hosted_button_id=YOUR_BUTTON_ID';
-        
-        // Option 4: Saweria (untuk Indonesia)
-        // const coffeeUrl = 'https://saweria.co/yourusername';
-        
-        // Option 5: Trakteer (untuk Indonesia)
-        // const coffeeUrl = 'https://trakteer.id/yourusername';
-        
-        // Buka di tab browser eksternal (bukan dalam iframe)
-        const newWindow = window.open(coffeeUrl, '_blank');
-        
-        // Cek apakah popup blocker aktif
-        if (newWindow) {
-            showNotification('Opening donation page in new browser tab...', 'success');
-        } else {
-            showNotification('Please allow popups to open donation page', 'warning');
-            // Alternatif: copy link to clipboard
-            navigator.clipboard.writeText(coffeeUrl).then(() => {
-                showNotification('Link copied to clipboard! You can paste it in your browser.', 'info');
-            });
-        }
-    }
-}
-
-// ===== RATE LIMITING FUNCTIONS =====
-function checkRateLimit(area) {
-    const now = Date.now();
-    
-    if (!loginAttempts[area]) {
-        loginAttempts[area] = { count: 0, lastAttempt: now };
-        return true;
-    }
-    
-    const attempts = loginAttempts[area];
-    
-    // Reset counter jika sudah lewat lockout time
-    if (now - attempts.lastAttempt > LOCKOUT_TIME) {
-        attempts.count = 0;
-        attempts.lastAttempt = now;
-        return true;
-    }
-    
-    // Cek apakah masih dalam masa lockout
-    if (attempts.count >= MAX_ATTEMPTS) {
-        const remainingTime = Math.ceil((LOCKOUT_TIME - (now - attempts.lastAttempt)) / 1000);
-        if (remainingTime > 0) {
-            showLoginError(`Terlalu banyak percobaan. Coba lagi dalam ${remainingTime} detik.`);
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-function recordFailedAttempt(area) {
-    const now = Date.now();
-    
-    if (!loginAttempts[area]) {
-        loginAttempts[area] = { count: 0, lastAttempt: now };
-    }
-    
-    loginAttempts[area].count++;
-    loginAttempts[area].lastAttempt = now;
-    
-    console.warn(`Failed login attempt for ${area}. Count: ${loginAttempts[area].count}`);
-}
-
-function resetLoginAttempts(area) {
-    if (loginAttempts[area]) {
-        loginAttempts[area].count = 0;
-    }
-}
-
-// ===== SESSION MANAGEMENT =====
-function startSession() {
-    sessionStartTime = Date.now();
-    
-    if (sessionChecker) {
-        clearInterval(sessionChecker);
-    }
-    
-    sessionChecker = setInterval(() => {
-        if (currentArea && !checkSessionTimeout()) {
-            clearInterval(sessionChecker);
-            sessionChecker = null;
-        }
-    }, 60000);
-    
-    console.info('Session started with 30-minute timeout');
-}
-
-function checkSessionTimeout() {
-    if (!sessionStartTime || !currentArea) {
-        return true;
-    }
-    
-    const sessionDuration = Date.now() - sessionStartTime;
-    
-    if (sessionDuration > SESSION_TIMEOUT) {
-        console.warn('Session timeout detected');
-        logout();
-        showNotification('Session expired. Please login again.', 'error');
-        return false;
-    }
-    
-    return true;
-}
-
-function endSession() {
-    sessionStartTime = null;
-    
-    if (sessionChecker) {
-        clearInterval(sessionChecker);
-        sessionChecker = null;
-    }
-    
-    console.info('Session ended');
-}
-
-// ===== AREA DATA =====
-let areaData = {
-    'BALI': {
-        title: 'BALI',
-        items: [
-            { name: 'Data Center Bali', url: 'https://script.google.com/macros/s/AKfycbx0-cB4AiSSLRf2T4nbcngraPQQ0Vrx80lMMK_25H8ybd6VJdKHxFk7KWPm7J5mcXYP/exec', icon: 'sales' },
-            { name: 'Penawaran Bali', url: 'https://script.google.com/macros/s/AKfycbxA10mgJgUypSHNewiyuo89R24DYOtfwk31-POFP5d1uqLHknBiPBeRuV06wJIXi7tCvw/exec', icon: 'reports' },
-            { name: 'Finance Bali', url: 'https://script.google.com/macros/s/AKfycbyQGfbe-SrYRLVaRdZ02aiz-Vk4MeAXhQaCjKkL3EP9crwPj4qnCL4GzIk1RRD4eHSuwA/exec', icon: 'analytics' },
-            { name: 'Faktur Bali', url: 'https://script.google.com/macros/s/AKfycbxtUQS9z2X0AJ4RCGJjPGc9_2O2hEov_U7gU9KwHUanO2TGjUMsMwa5xDuAS5sJT9zZ/exec', icon: 'analytics' }
-        ]
-    },
-    'NTB': {
-        title: 'NTB',
-        items: [
-            { name: 'Penawaran NTB', url: 'https://script.google.com/macros/s/AKfycbxA10mgJgUypSHNewiyuo89R24DYOtfwk31-POFP5d1uqLHknBiPBeRuV06wJIXi7tCvw/exec', icon: 'reports' },
-            { name: 'Faktur NTB', url: 'https://script.google.com/macros/s/AKfycbzveJ5m56TlE_5NAYP-m5ek9QoD3zgVJ2kem_BAvO1qYrkGztQDp0nT4qFF-yfw-XZeiA/exec', icon: 'analytics' }
-        ]
-    },
-    'NTT': {
-        title: 'NTT',
-        items: [
-            { name: 'Penawaran NTT', url: 'https://script.google.com/macros/s/AKfycbxA10mgJgUypSHNewiyuo89R24DYOtfwk31-POFP5d1uqLHknBiPBeRuV06wJIXi7tCvw/exec', icon: 'reports' },
-            { name: 'Faktur NTT', url: '/', icon: 'analytics' }
-        ]
-    }
-};
-
-// ===== INITIALIZATION =====
-// Initialize first tab
-tabs.push({
-    id: 0,
-    url: '',
-    title: 'New Tab',
-    isHomePage: true,
-    history: [],
-    historyIndex: -1
-});
-
-// Initialize
-document.addEventListener('DOMContentLoaded', function() {
-    console.info('Edge Browser initialized');
-    setupKeyboardShortcuts();
-    
-    // Check if user was previously logged in - FIXED: gunakan encryptedAreaPins
-    const savedArea = sessionStorage.getItem('currentArea');
-    if (savedArea && encryptedAreaPins[savedArea]) {
-        console.info(`Restoring session for area: ${savedArea}`);
-        currentArea = savedArea;
-        showAreaSection(currentArea);
-        startSession(); // Restart session
-    } else {
-        // Ensure Home is visible when not logged in
-        const homeNavItem = document.querySelector('.nav-item[onclick*="showWelcome"]');
-        if (homeNavItem) {
-            homeNavItem.style.display = 'flex';
-        }
-    }
-});
-
-// ===== LOGIN FUNCTIONALITY =====
-function showLogin() {
-    document.getElementById('loginModal').style.display = 'flex';
-    resetLoginForm();
-}
-
-function resetLoginForm() {
-    selectedArea = null;
-    document.getElementById('loginError').textContent = '';
-    document.getElementById('loginSuccess').textContent = '';
-    
-    // Reset area selection
-    document.querySelectorAll('.area-btn').forEach(btn => btn.classList.remove('selected'));
-    
-    // Reset area info
-    const areaInfo = document.getElementById('areaInfo');
-    areaInfo.classList.remove('selected');
-    areaInfo.innerHTML = '<h4>Pilih Area Regional</h4><p>Silakan pilih area yang ingin diakses</p>';
-    
-    // Clear and disable PIN inputs
-    const pinInputs = document.querySelectorAll('.pin-input');
-    pinInputs.forEach(input => {
-        input.value = '';
-        input.disabled = true;
-        input.classList.remove('error');
-    });
-    
-    // Disable login button
-    const loginBtn = document.getElementById('loginBtn');
-    loginBtn.disabled = true;
-    loginBtn.textContent = 'Pilih Area Terlebih Dahulu';
-}
-
-function selectArea(area, button) {
-    selectedArea = area;
-    console.info(`Area selected: ${area}`);
-    
-    // Update button states
-    document.querySelectorAll('.area-btn').forEach(btn => btn.classList.remove('selected'));
-    button.classList.add('selected');
-    
-    // Update area info
-    const areaInfo = document.getElementById('areaInfo');
-    areaInfo.classList.add('selected');
-    areaInfo.innerHTML = `
-        <h4>Area ${area}</h4>
-        <p>Masukkan PIN 3 digit untuk area ${area}</p>
-    `;
-    
-    // Enable PIN inputs
-    const pinInputs = document.querySelectorAll('.pin-input');
-    pinInputs.forEach(input => {
-        input.disabled = false;
-        input.classList.remove('error');
-        input.value = '';
-    });
-    pinInputs[0].focus();
-    
-    // Enable login button
-    const loginBtn = document.getElementById('loginBtn');
-    loginBtn.disabled = false;
-    loginBtn.textContent = `Login ke Area ${area}`;
-    
-    // Clear messages
-    document.getElementById('loginError').textContent = '';
-    document.getElementById('loginSuccess').textContent = '';
-}
-
-function moveToNext(input) {
-    if (input.value.length === 1) {
-        const next = input.nextElementSibling;
-        if (next && next.classList.contains('pin-input')) {
-            next.focus();
-        }
-        
-        // Auto-submit if all inputs are filled
-        const pinInputs = document.querySelectorAll('.pin-input');
-        const allFilled = Array.from(pinInputs).every(inp => inp.value.length === 1);
-        if (allFilled) {
-            setTimeout(() => validatePin(), 300);
-        }
-    }
-}
-
-function handlePinInput(event) {
-    const input = event.target;
-    
-    if (event.key === 'Backspace') {
-        if (input.value === '') {
-            const prev = input.previousElementSibling;
-            if (prev && prev.classList.contains('pin-input')) {
-                prev.focus();
-            }
-        }
-    }
-    
-    // Only allow numbers
-    if (event.key && !/[0-9]/.test(event.key) && !['Backspace', 'Delete', 'Tab', 'Enter'].includes(event.key)) {
-        event.preventDefault();
-    }
-}
-
-// ===== PIN VALIDATION - FIXED =====
-function validatePin() {
-    console.info('validatePin() called');
-    
-    // Cek apakah area sudah dipilih
-    if (!selectedArea) {
-        showLoginError('Pilih area terlebih dahulu');
-        return;
-    }
-
-    // Cek rate limiting untuk mencegah brute force
-    if (!checkRateLimit(selectedArea)) {
-        return;
-    }
-
-    // Ambil PIN yang diinput user
-    const pinInputs = document.querySelectorAll('.pin-input');
-    const enteredPin = Array.from(pinInputs).map(input => input.value).join('');
-    
-    console.info(`Entered PIN: ${enteredPin}, Selected Area: ${selectedArea}`);
-    
-    // Validasi panjang PIN
-    if (enteredPin.length !== 3) {
-        showLoginError('PIN harus 3 digit');
-        return;
-    }
-    
-    // Validasi format PIN (harus angka)
-    if (!/^\d{3}$/.test(enteredPin)) {
-        showLoginError('PIN harus berupa angka');
-        return;
-    }
-    
-    console.info(`Validating PIN for area: ${selectedArea}`);
-    console.info(`Encoded input: ${btoa(enteredPin)}, Stored: ${encryptedAreaPins[selectedArea]}`);
-    
-    // VALIDASI DENGAN BASE64 ENCRYPTION
-    if (btoa(enteredPin) === encryptedAreaPins[selectedArea]) {
-        console.info('✅ PIN validation successful');
-        
-        // Reset attempts counter
-        resetLoginAttempts(selectedArea);
-        
-        // Mulai session
-        startSession();
-        
-        // Tampilkan sukses
-        showLoginSuccess(`Berhasil login ke Area ${selectedArea}`);
-        
-        // Proses login
-        setTimeout(() => {
-            document.getElementById('loginModal').style.display = 'none';
-            sessionStorage.setItem('currentArea', selectedArea);
-            currentArea = selectedArea;
-            clearAllTabs();
-            showAreaSection(selectedArea);
-            showWelcome(null);
-            showNotification(`Selamat datang di Area ${selectedArea}`, 'success');
-        }, 1500);
-        
-    } else {
-        console.warn('❌ PIN validation failed');
-        
-        // Catat percobaan gagal
-        recordFailedAttempt(selectedArea);
-        
-        // Tampilkan error
-        showLoginError(`PIN salah untuk Area ${selectedArea}. Silakan coba lagi.`);
-        
-        // Efek visual error
-        const pinInputs = document.querySelectorAll('.pin-input');
-        pinInputs.forEach(input => {
-            input.classList.add('error');
-            input.value = '';
-        });
-        
-        // Hapus efek error setelah 1 detik
-        setTimeout(() => {
-            pinInputs.forEach(input => input.classList.remove('error'));
-            if (pinInputs[0]) {
-                pinInputs[0].focus();
-            }
-        }, 1000);
-    }
-}
-
-function showLoginError(message) {
-    document.getElementById('loginError').textContent = message;
-    document.getElementById('loginSuccess').textContent = '';
-}
-
-function showLoginSuccess(message) {
-    document.getElementById('loginSuccess').textContent = message;
-    document.getElementById('loginError').textContent = '';
-}
-
-// ===== AREA SECTION MANAGEMENT =====
-function showAreaSection(area) {
-    const areaSections = document.getElementById('areaSections');
-    areaSections.style.display = 'block';
-    
-    // Hide Home menu item when logged in
-    const homeNavItem = document.querySelector('.nav-item[onclick*="showWelcome"]');
-    if (homeNavItem) {
-        homeNavItem.style.display = 'none';
-    }
-    
-    // Clear previous area sections
-    areaSections.innerHTML = '';
-    
-    // Create logout button first
-    const logoutSection = document.createElement('div');
-    logoutSection.className = 'nav-section';
-    logoutSection.innerHTML = `
-        <div class="nav-item" onclick="logout()" style="color: #f44336;">
-            <svg class="nav-icon" viewBox="0 -960 960 960" fill="currentColor">
-                <path d="M240-640h360v-80q0-50-35-85t-85-35q-50 0-85 35t-35 85h-80q0-83 58.5-141.5T480-920q83 0 141.5 58.5T680-720v80h40q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640Zm0 480h480v-400H240v400Zm240-120q33 0 56.5-23.5T560-360q0-33-23.5-56.5T480-440q-33 0-56.5 23.5T400-360q0 33 23.5 56.5T480-280ZM240-160v-400 400Z"/>
-            </svg>
-            <span class="nav-text">Logout</span>
-        </div>
-    `;
-    
-    // Create new area section
-    const section = document.createElement('div');
-    section.className = 'nav-section';
-    
-    // Add title
-    const title = document.createElement('div');
-    title.className = 'nav-section-title';
-    title.textContent = `AREA ${area}`;
-    section.appendChild(title);
-    
-    // Add menu items
-    areaData[area].items.forEach(item => {
-        const navItem = document.createElement('div');
-        navItem.className = 'nav-item';
-        navItem.onclick = function() { 
-            addNewTab(item.url, item.name, this);
+        // ===== ENCRYPTED PIN DATA =====
+        let encryptedAreaPins = {
+            'BALI': 'OTkx',     
+            'NTB': 'MzMx',      
+            'NTT': 'NjYx'       
         };
-        
-        // Add icon based on item type
-        let iconPath = '';
-        switch(item.icon) {
-            case 'analytics':
-                iconPath = '<path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>';
-                break;
-            case 'sales':
-                iconPath = '<path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>';
-                break;
-            case 'reports':
-                iconPath = '<path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>';
-                break;
-        }
-        
-        navItem.innerHTML = `
-            <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor">
-                ${iconPath}
-            </svg>
-            <span class="nav-text">${item.name}</span>
-        `;
-        
-        section.appendChild(navItem);
-    });
-    
-    areaSections.appendChild(section);
-    areaSections.appendChild(logoutSection);
-    
-    // Update user info
-    document.getElementById('userName').textContent = `Area ${area}`;
-    document.getElementById('userEmail').textContent = 'Logged In';
-    document.getElementById('userAvatar').textContent = area.charAt(0);
-    
-    console.info(`Area section shown for: ${area}`);
-}
 
-function logout() {
-    console.info('Logging out...');
-    
-    // Clear session
-    sessionStorage.removeItem('currentArea');
-    currentArea = null;
-    selectedArea = null;
-    
-    // End session
-    endSession();
-    
-    // Clear login attempts
-    loginAttempts = {};
-    
-    // Hide area sections
-    document.getElementById('areaSections').style.display = 'none';
-    
-    // Show Home menu item again
-    const homeNavItem = document.querySelector('.nav-item[onclick*="showWelcome"]');
-    if (homeNavItem) {
-        homeNavItem.style.display = 'flex';
-        setActiveNavItem(homeNavItem);
-    }
-    
-    // Clear all tabs and create new default tab
-    clearAllTabs();
-    
-    // Reset user info
-    document.getElementById('userName').textContent = 'User';
-    document.getElementById('userEmail').textContent = 'Ready to login';
-    document.getElementById('userAvatar').textContent = '🐻';
-    
-    // Go back to welcome screen
-    showWelcome(homeNavItem);
-    
-    showNotification('Berhasil logout', 'info');
-}
+        // ===== SECURITY SYSTEM =====
+        let loginAttempts = {};
+        const MAX_ATTEMPTS = 5;
+        const LOCKOUT_TIME = 300000; // 5 menit
+        const SESSION_TIMEOUT = 1800000; // 30 menit
+        let sessionStartTime = null;
+        let sessionChecker = null;
 
-// Helper function to clear all tabs
-function clearAllTabs() {
-    const tabBar = document.getElementById('tabBar');
-    const contentArea = document.querySelector('.content-area');
-    
-    // Remove all existing tabs
-    const existingTabs = tabBar.querySelectorAll('.tab');
-    existingTabs.forEach(tab => tab.remove());
-    
-    // Remove all existing content
-    const existingContent = contentArea.querySelectorAll('.welcome-screen, .content-iframe');
-    existingContent.forEach(content => content.remove());
-    
-    // Reset tab system
-    tabs = [];
-    activeTabId = 0;
-    nextTabId = 1;
-    
-    // Create new default tab
-    tabs.push({
-        id: 0,
-        url: '',
-        title: 'New Tab',
-        isHomePage: true,
-        history: [],
-        historyIndex: -1
-    });
-    
-    const newTabBtn = tabBar.querySelector('.new-tab-btn');
-    const defaultTab = document.createElement('div');
-    defaultTab.className = 'tab active';
-    defaultTab.setAttribute('data-tab-id', '0');
-    defaultTab.innerHTML = `
-        <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
-        </svg>
-        <span class="tab-title">New Tab</span>
-        <button class="tab-close" onclick="closeTab(event, this)">×</button>
-    `;
-    defaultTab.onclick = function() { switchTab(this); };
-    
-    tabBar.insertBefore(defaultTab, newTabBtn);
-    
-    // Create welcome screen for default tab
-    const welcomeScreen = document.createElement('div');
-    welcomeScreen.className = 'welcome-screen';
-    welcomeScreen.id = 'welcomeScreen-0';
-    welcomeScreen.style.display = 'flex';
-    welcomeScreen.innerHTML = `
-        <h1 class="welcome-title">💗 بِسْمِ اللهِ 💗</h1>
-        <p class="welcome-subtitle">Awali segala aktifitasmu dengan mengucapkan bismillah</p>
-        
-        <div class="quick-access">
-            <div class="quick-tile" onclick="showLogin()">
-                <div class="quick-tile-icon">🔐</div>
-                <div class="quick-tile-title">Login Area</div>
-                <div class="quick-tile-desc">Akses Dashboard Regional</div>
-            </div>
-        </div>
-    `;
-    
-    contentArea.appendChild(welcomeScreen);
-}
-
-// Sidebar toggle
-function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    sidebar.classList.toggle('collapsed');
-}
-
-// Tab management dengan sistem terpisah
-function addNewTab(url = '', title = 'New Tab', navItem = null) {
-    const tabBar = document.getElementById('tabBar');
-    const contentArea = document.querySelector('.content-area');
-    const newTabBtn = tabBar.querySelector('.new-tab-btn');
-    
-    const tabId = nextTabId++;
-    
-    // Add to tabs array
-    tabs.push({
-        id: tabId,
-        url: url,
-        title: title,
-        isHomePage: !url,
-        history: url ? [{ url, title, timestamp: Date.now() }] : [],
-        historyIndex: url ? 0 : -1
-    });
-    
-    // Create new tab element
-    const tab = document.createElement('div');
-    tab.className = 'tab';
-    tab.setAttribute('data-tab-id', tabId);
-    tab.innerHTML = `
-        <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-        </svg>
-        <span class="tab-title">${title}</span>
-        <button class="tab-close" onclick="closeTab(event, this)">×</button>
-    `;
-    tab.onclick = function() { switchTab(this); };
-    
-    tabBar.insertBefore(tab, newTabBtn);
-    
-    // Create content for this tab
-    if (url) {
-        // Create iframe for URL
-        const iframe = document.createElement('iframe');
-        iframe.className = 'content-iframe';
-        iframe.id = `iframe-${tabId}`;
-        iframe.style.display = 'none';
-        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
-        iframe.src = url;
-        contentArea.appendChild(iframe);
-    } else {
-        // Create welcome screen for empty tab
-        const welcomeScreen = document.createElement('div');
-        welcomeScreen.className = 'welcome-screen';
-        welcomeScreen.id = `welcomeScreen-${tabId}`;
-        welcomeScreen.style.display = 'none';
-        welcomeScreen.innerHTML = `
-            <h1 class="welcome-title">💗 بِسْمِ اللهِ 💗</h1>
-            <p class="welcome-subtitle">Awali segala aktifitasmu dengan mengucapkan bismillah</p>
+        // ===== NEW FUNCTIONS FOR TOGGLE AND COFFEE =====
+        function toggleTopBar() {
+            const topBar = document.getElementById('topBar');
+            const toggleIcon = document.getElementById('toggleIcon');
             
-            <div class="quick-access">
-                <div class="quick-tile" onclick="showLogin()">
-                    <div class="quick-tile-icon">🔐</div>
-                    <div class="quick-tile-title">Login Area</div>
-                    <div class="quick-tile-desc">Akses Dashboard Regional</div>
-                </div>
-            </div>
-        `;
-        contentArea.appendChild(welcomeScreen);
-    }
-    
-    // Switch to new tab
-    switchTab(tab);
-    
-    // Update nav item
-    if (navItem) {
-        setActiveNavItem(navItem);
-    }
-    
-    // Update URL bar
-    updateUrlBar();
-}
-
-function switchTab(tabElement) {
-    const tabId = parseInt(tabElement.getAttribute('data-tab-id'));
-    
-    // Update active tab
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tabElement.classList.add('active');
-    activeTabId = tabId;
-    
-    // Hide all content
-    document.querySelectorAll('.content-iframe, .welcome-screen').forEach(content => {
-        content.style.display = 'none';
-    });
-    
-    // Show content for active tab
-    const tab = tabs.find(t => t.id === tabId);
-    if (tab.isHomePage) {
-        const welcomeScreen = document.getElementById(`welcomeScreen-${tabId}`);
-        if (welcomeScreen) {
-            welcomeScreen.style.display = 'flex';
-        }
-    } else {
-        const iframe = document.getElementById(`iframe-${tabId}`);
-        if (iframe) {
-            iframe.style.display = 'block';
-        }
-    }
-    
-    updateUrlBar();
-    updateNavigationButtons();
-}
-
-function closeTab(event, button) {
-    event.stopPropagation();
-    const tab = button.parentElement;
-    const tabId = parseInt(tab.getAttribute('data-tab-id'));
-    const tabBar = document.getElementById('tabBar');
-    
-    if (tabBar.querySelectorAll('.tab').length > 1) {
-        // Remove from tabs array
-        tabs = tabs.filter(t => t.id !== tabId);
-        
-        // Remove content
-        const iframe = document.getElementById(`iframe-${tabId}`);
-        const welcomeScreen = document.getElementById(`welcomeScreen-${tabId}`);
-        if (iframe) iframe.remove();
-        if (welcomeScreen) welcomeScreen.remove();
-        
-        // Remove tab element
-        tab.remove();
-        
-        // If this was the active tab, activate another tab
-        if (tab.classList.contains('active')) {
-            const firstTab = tabBar.querySelector('.tab');
-            if (firstTab) {
-                switchTab(firstTab);
+            topBarCollapsed = !topBarCollapsed;
+            
+            if (topBarCollapsed) {
+                topBar.classList.add('collapsed');
+                toggleIcon.innerHTML = '<path d="M7 14l5-5 5 5z"/>';
+            } else {
+                topBar.classList.remove('collapsed');
+                toggleIcon.innerHTML = '<path d="M7 10l5 5 5-5z"/>';
             }
         }
-    }
-}
 
-// Navigation dengan history per tab
-function navigateTo(url, hideUrl = false, displayName = '') {
-    const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab) return;
-    
-    const loadingBar = document.getElementById('loadingBar');
-    
-    // Update tab data
-    tab.url = url;
-    tab.title = displayName || url;
-    tab.isHomePage = false;
-    
-    // Add to tab history
-    addToTabHistory(activeTabId, url, displayName || url);
-    
-    // Hide welcome screen if exists
-    const welcomeScreen = document.getElementById(`welcomeScreen-${activeTabId}`);
-    if (welcomeScreen) {
-        welcomeScreen.style.display = 'none';
-    }
-    
-    // Get or create iframe for this tab
-    let iframe = document.getElementById(`iframe-${activeTabId}`);
-    if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.className = 'content-iframe';
-        iframe.id = `iframe-${activeTabId}`;
-        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
-        document.querySelector('.content-area').appendChild(iframe);
-    }
-    
-    iframe.style.display = 'block';
-    
-    loadingBar.classList.add('active');
-    
-    // Load the URL in iframe
-    try {
-        iframe.src = url;
-        
-        // Update tab title
-        const tabElement = document.querySelector(`[data-tab-id="${activeTabId}"]`);
-        if (tabElement) {
-            const titleElement = tabElement.querySelector('.tab-title');
-            titleElement.textContent = displayName || 'Loading...';
+        function openBuyMeCoffee() {
+            // Menggunakan window.location untuk menghindari pemblokiran popup
+            const coffeeUrl = 'https://www.buymeacoffee.com/yourusername';
+            
+            // Tampilkan pesan konfirmasi sebelum membuka link
+            if (confirm('Anda akan meninggalkan halaman ini menuju halaman donasi. Lanjutkan?')) {
+                window.location.href = coffeeUrl;
+            }
         }
-        
-        // Hide loading bar after iframe loads
-        iframe.onload = function() {
-            loadingBar.classList.remove('active');
-        };
-        
-        // Handle load error
-        iframe.onerror = function() {
-            loadingBar.classList.remove('active');
-            showNotification('Failed to load page', 'error');
-        };
-        
-        // Timeout fallback
-        setTimeout(() => {
-            loadingBar.classList.remove('active');
-        }, 5000);
-        
-    } catch (error) {
-        loadingBar.classList.remove('active');
-        showNotification('Error loading page', 'error');
-    }
-    
-    updateUrlBar();
-}
 
-function showWelcome(navItem) {
-    const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab) return;
-    
-    // Hide iframe for this tab
-    const iframe = document.getElementById(`iframe-${activeTabId}`);
-    if (iframe) {
-        iframe.style.display = 'none';
-    }
-    
-    // Show welcome screen for this tab
-    const welcomeScreen = document.getElementById(`welcomeScreen-${activeTabId}`);
-    if (welcomeScreen) {
-        welcomeScreen.style.display = 'flex';
-    }
-    
-    // Update tab data
-    tab.isHomePage = true;
-    tab.url = '';
-    
-    updateUrlBar();
-    
-    if (navItem) {
-        setActiveNavItem(navItem);
-    }
-}
-
-function setActiveNavItem(item) {
-    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-    item.classList.add('active');
-}
-
-// History management per tab
-function addToTabHistory(tabId, url, title) {
-    const tab = tabs.find(t => t.id === tabId);
-    if (!tab) return;
-    
-    const historyItem = { url, title, timestamp: Date.now() };
-    
-    // Remove any items after current index (for new navigation after going back)
-    tab.history = tab.history.slice(0, tab.historyIndex + 1);
-    
-    // Add new item
-    tab.history.push(historyItem);
-    tab.historyIndex = tab.history.length - 1;
-    
-    // Limit history size
-    if (tab.history.length > 50) {
-        tab.history.shift();
-        tab.historyIndex--;
-    }
-    
-    updateNavigationButtons();
-}
-
-function updateNavigationButtons() {
-    const tab = tabs.find(t => t.id === activeTabId);
-    const backBtn = document.querySelector('.nav-btn[onclick="goBack()"]');
-    const forwardBtn = document.querySelector('.nav-btn[onclick="goForward()"]');
-    
-    if (tab) {
-        backBtn.disabled = tab.historyIndex <= 0;
-        forwardBtn.disabled = tab.historyIndex >= tab.history.length - 1;
-    } else {
-        backBtn.disabled = true;
-        forwardBtn.disabled = true;
-    }
-}
-
-function updateUrlBar() {
-    const tab = tabs.find(t => t.id === activeTabId);
-    const urlBar = document.getElementById('urlBar');
-    
-    if (tab) {
-        if (tab.isHomePage) {
-            urlBar.value = '';
-        } else if (tab.url && tab.url.includes('script.google.com')) {
-            urlBar.value = tab.title || 'Dashboard Internal';
-        } else {
-            urlBar.value = tab.url || '';
+        // ===== RATE LIMITING FUNCTIONS =====
+        function checkRateLimit(area) {
+            const now = Date.now();
+            
+            if (!loginAttempts[area]) {
+                loginAttempts[area] = { count: 0, lastAttempt: now };
+                return true;
+            }
+            
+            const attempts = loginAttempts[area];
+            
+            // Reset counter jika sudah lewat lockout time
+            if (now - attempts.lastAttempt > LOCKOUT_TIME) {
+                attempts.count = 0;
+                attempts.lastAttempt = now;
+                return true;
+            }
+            
+            // Cek apakah masih dalam masa lockout
+            if (attempts.count >= MAX_ATTEMPTS) {
+                const remainingTime = Math.ceil((LOCKOUT_TIME - (now - attempts.lastAttempt)) / 1000);
+                if (remainingTime > 0) {
+                    showLoginError(`Terlalu banyak percobaan. Coba lagi dalam ${remainingTime} detik.`);
+                    return false;
+                }
+            }
+            
+            return true;
         }
-    }
-}
 
-// Browser controls per tab
-function goBack() {
-    const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.historyIndex <= 0) return;
-    
-    tab.historyIndex--;
-    const historyItem = tab.history[tab.historyIndex];
-    
-    const iframe = document.getElementById(`iframe-${activeTabId}`);
-    if (iframe) {
-        iframe.src = historyItem.url;
-        tab.url = historyItem.url;
-        tab.title = historyItem.title;
-        updateUrlBar();
-    }
-    
-    updateNavigationButtons();
-}
+        function recordFailedAttempt(area) {
+            const now = Date.now();
+            
+            if (!loginAttempts[area]) {
+                loginAttempts[area] = { count: 0, lastAttempt: now };
+            }
+            
+            loginAttempts[area].count++;
+            loginAttempts[area].lastAttempt = now;
+            
+            console.warn(`Failed login attempt for ${area}. Count: ${loginAttempts[area].count}`);
+        }
 
-function goForward() {
-    const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.historyIndex >= tab.history.length - 1) return;
-    
-    tab.historyIndex++;
-    const historyItem = tab.history[tab.historyIndex];
-    
-    const iframe = document.getElementById(`iframe-${activeTabId}`);
-    if (iframe) {
-        iframe.src = historyItem.url;
-        tab.url = historyItem.url;
-        tab.title = historyItem.title;
-        updateUrlBar();
-    }
-    
-    updateNavigationButtons();
-}
+        function resetLoginAttempts(area) {
+            if (loginAttempts[area]) {
+                loginAttempts[area].count = 0;
+            }
+        }
 
-function refreshPage() {
-    const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab || tab.isHomePage) return;
-    
-    const iframe = document.getElementById(`iframe-${activeTabId}`);
-    if (iframe) {
-        const currentSrc = iframe.src;
-        iframe.src = '';
-        setTimeout(() => {
-            iframe.src = currentSrc;
-            showNotification('Page refreshed', 'success');
-        }, 100);
-    }
-}
+        // ===== SESSION MANAGEMENT =====
+        function startSession() {
+            sessionStartTime = Date.now();
+            
+            if (sessionChecker) {
+                clearInterval(sessionChecker);
+            }
+            
+            sessionChecker = setInterval(() => {
+                if (currentArea && !checkSessionTimeout()) {
+                    clearInterval(sessionChecker);
+                    sessionChecker = null;
+                }
+            }, 60000);
+            
+            console.info('Session started with 30-minute timeout');
+        }
 
-// URL bar functionality
-document.addEventListener('DOMContentLoaded', function() {
-    const urlBar = document.getElementById('urlBar');
-    
-    if (urlBar) {
-        urlBar.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                const url = this.value.trim();
-                if (url) {
-                    let fullUrl = url;
-                    
-                    // Add protocol if missing
-                    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                        // Check if it looks like a URL
-                        if (url.includes('.') && !url.includes(' ')) {
-                            fullUrl = 'https://' + url;
-                        } else {
-                            // Treat as search query
-                            fullUrl = `https://www.google.com/search?q=${encodeURIComponent(url)}`;
-                        }
-                    }
-                    
-                    navigateTo(fullUrl, false, url);
-                    this.blur();
+        function checkSessionTimeout() {
+            if (!sessionStartTime || !currentArea) {
+                return true;
+            }
+            
+            const sessionDuration = Date.now() - sessionStartTime;
+            
+            if (sessionDuration > SESSION_TIMEOUT) {
+                console.warn('Session timeout detected');
+                logout();
+                showNotification('Session expired. Please login again.', 'error');
+                return false;
+            }
+            
+            return true;
+        }
+
+        function endSession() {
+            sessionStartTime = null;
+            
+            if (sessionChecker) {
+                clearInterval(sessionChecker);
+                sessionChecker = null;
+            }
+            
+            console.info('Session ended');
+        }
+
+        // ===== AREA DATA =====
+        let areaData = {
+            'BALI': {
+                title: 'BALI',
+                items: [
+                    { name: 'Data Center Bali', url: 'https://script.google.com/macros/s/AKfycbx0-cB4AiSSLRf2T4nbcngraPQQ0Vrx80lMMK_25H8ybd6VJdKHxFk7KWPm7J5mcXYP/exec', icon: 'sales' },
+                    { name: 'Penawaran Bali', url: 'https://script.google.com/macros/s/AKfycbxA10mgJgUypSHNewiyuo89R24DYOtfwk31-POFP5d1uqLHknBiPBeRuV06wJIXi7tCvw/exec', icon: 'reports' },
+                    { name: 'Finance Bali', url: 'https://script.google.com/macros/s/AKfycbyQGfbe-SrYRLVaRdZ02aiz-Vk4MeAXhQaCjKkL3EP9crwPj4qnCL4GzIk1RRD4eHSuwA/exec', icon: 'analytics' },
+                    { name: 'Faktur Bali', url: 'https://script.google.com/macros/s/AKfycbxtUQS9z2X0AJ4RCGJjPGc9_2O2hEov_U7gU9KwHUanO2TGjUMsMwa5xDuAS5sJT9zZ/exec', icon: 'analytics' }
+                ]
+            },
+            'NTB': {
+                title: 'NTB',
+                items: [
+                    { name: 'Penawaran NTB', url: 'https://script.google.com/macros/s/AKfycbxA10mgJgUypSHNewiyuo89R24DYOtfwk31-POFP5d1uqLHknBiPBeRuV06wJIXi7tCvw/exec', icon: 'reports' },
+                    { name: 'Faktur NTB', url: 'https://script.google.com/macros/s/AKfycbzveJ5m56TlE_5NAYP-m5ek9QoD3zgVJ2kem_BAvO1qYrkGztQDp0nT4qFF-yfw-XZeiA/exec', icon: 'analytics' }
+                ]
+            },
+            'NTT': {
+                title: 'NTT',
+                items: [
+                    { name: 'Penawaran NTT', url: 'https://script.google.com/macros/s/AKfycbxA10mgJgUypSHNewiyuo89R24DYOtfwk31-POFP5d1uqLHknBiPBeRuV06wJIXi7tCvw/exec', icon: 'reports' },
+                    { name: 'Faktur NTT', url: '/', icon: 'analytics' }
+                ]
+            }
+        };
+
+        // ===== INITIALIZATION =====
+        // Initialize first tab
+        tabs.push({
+            id: 0,
+            url: '',
+            title: 'New Tab',
+            isHomePage: true,
+            history: [],
+            historyIndex: -1
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.info('Edge Browser initialized');
+            setupKeyboardShortcuts();
+            
+            // Check if user was previously logged in
+            const savedArea = sessionStorage.getItem('currentArea');
+            if (savedArea && encryptedAreaPins[savedArea]) {
+                console.info(`Restoring session for area: ${savedArea}`);
+                currentArea = savedArea;
+                showAreaSection(currentArea);
+                startSession(); // Restart session
+            } else {
+                // Ensure Home is visible when not logged in
+                const homeNavItem = document.querySelector('.nav-item[onclick*="showWelcome"]');
+                if (homeNavItem) {
+                    homeNavItem.style.display = 'flex';
                 }
             }
         });
 
-        // Focus URL bar on click
-        urlBar.addEventListener('focus', function() {
-            this.select();
-        });
-    }
-});
-
-// Notifications
-function showNotification(message, type = 'info') {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 15px 20px;
-        background: ${
-            type === 'success' ? '#4CAF50' : 
-            type === 'error' ? '#f44336' : 
-            type === 'warning' ? '#ff9800' :
-            '#2196F3'
-        };
-        color: white;
-        border-radius: 10px;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.2);
-        z-index: 10001;
-        animation: slideIn 0.3s ease;
-        max-width: 300px;
-        font-size: 14px;
-        font-weight: 500;
-    `;
-    notification.textContent = message;
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
-}
-
-// Keyboard shortcuts
-function setupKeyboardShortcuts() {
-    document.addEventListener('keydown', function(e) {
-        // Ctrl+T: New tab
-        if (e.ctrlKey && e.key === 't') {
-            e.preventDefault();
-            addNewTab();
+        // ===== LOGIN FUNCTIONALITY =====
+        function showLogin() {
+            document.getElementById('loginModal').style.display = 'flex';
+            resetLoginForm();
         }
-        
-        // Ctrl+W: Close tab
-        if (e.ctrlKey && e.key === 'w') {
-            e.preventDefault();
-            const activeTab = document.querySelector('.tab.active');
-            if (activeTab) {
-                const closeBtn = activeTab.querySelector('.tab-close');
-                closeBtn.click();
+
+        function resetLoginForm() {
+            selectedArea = null;
+            document.getElementById('loginError').textContent = '';
+            document.getElementById('loginSuccess').textContent = '';
+            
+            // Reset area selection
+            document.querySelectorAll('.area-btn').forEach(btn => btn.classList.remove('selected'));
+            
+            // Reset area info
+            const areaInfo = document.getElementById('areaInfo');
+            areaInfo.classList.remove('selected');
+            areaInfo.innerHTML = '<h4>Pilih Area Regional</h4><p>Silakan pilih area yang ingin diakses</p>';
+            
+            // Clear and disable PIN inputs
+            const pinInputs = document.querySelectorAll('.pin-input');
+            pinInputs.forEach(input => {
+                input.value = '';
+                input.disabled = true;
+                input.classList.remove('error');
+            });
+            
+            // Disable login button
+            const loginBtn = document.getElementById('loginBtn');
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Pilih Area Terlebih Dahulu';
+        }
+
+        function selectArea(area, button) {
+            selectedArea = area;
+            console.info(`Area selected: ${area}`);
+            
+            // Update button states
+            document.querySelectorAll('.area-btn').forEach(btn => btn.classList.remove('selected'));
+            button.classList.add('selected');
+            
+            // Update area info
+            const areaInfo = document.getElementById('areaInfo');
+            areaInfo.classList.add('selected');
+            areaInfo.innerHTML = `
+                <h4>Area ${area}</h4>
+                <p>Masukkan PIN 3 digit untuk area ${area}</p>
+            `;
+            
+            // Enable PIN inputs
+            const pinInputs = document.querySelectorAll('.pin-input');
+            pinInputs.forEach(input => {
+                input.disabled = false;
+                input.classList.remove('error');
+                input.value = '';
+            });
+            pinInputs[0].focus();
+            
+            // Enable login button
+            const loginBtn = document.getElementById('loginBtn');
+            loginBtn.disabled = false;
+            loginBtn.textContent = `Login ke Area ${area}`;
+            
+            // Clear messages
+            document.getElementById('loginError').textContent = '';
+            document.getElementById('loginSuccess').textContent = '';
+        }
+
+        function moveToNext(input) {
+            if (input.value.length === 1) {
+                const next = input.nextElementSibling;
+                if (next && next.classList.contains('pin-input')) {
+                    next.focus();
+                }
+                
+                // Auto-submit if all inputs are filled
+                const pinInputs = document.querySelectorAll('.pin-input');
+                const allFilled = Array.from(pinInputs).every(inp => inp.value.length === 1);
+                if (allFilled) {
+                    setTimeout(() => validatePin(), 300);
+                }
             }
         }
-        
-        // F5: Refresh
-        if (e.key === 'F5') {
-            e.preventDefault();
-            refreshPage();
+
+        function handlePinInput(event) {
+            const input = event.target;
+            
+            if (event.key === 'Backspace') {
+                if (input.value === '') {
+                    const prev = input.previousElementSibling;
+                    if (prev && prev.classList.contains('pin-input')) {
+                        prev.focus();
+                    }
+                }
+            }
+            
+            // Only allow numbers
+            if (event.key && !/[0-9]/.test(event.key) && !['Backspace', 'Delete', 'Tab', 'Enter'].includes(event.key)) {
+                event.preventDefault();
+            }
         }
-        
-        // Ctrl+L: Focus URL bar
-        if (e.ctrlKey && e.key === 'l') {
-            e.preventDefault();
+
+        // ===== PIN VALIDATION =====
+        function validatePin() {
+            console.info('validatePin() called');
+            
+            // Cek apakah area sudah dipilih
+            if (!selectedArea) {
+                showLoginError('Pilih area terlebih dahulu');
+                return;
+            }
+
+            // Cek rate limiting untuk mencegah brute force
+            if (!checkRateLimit(selectedArea)) {
+                return;
+            }
+
+            // Ambil PIN yang diinput user
+            const pinInputs = document.querySelectorAll('.pin-input');
+            const enteredPin = Array.from(pinInputs).map(input => input.value).join('');
+            
+            console.info(`Entered PIN: ${enteredPin}, Selected Area: ${selectedArea}`);
+            
+            // Validasi panjang PIN
+            if (enteredPin.length !== 3) {
+                showLoginError('PIN harus 3 digit');
+                return;
+            }
+            
+            // Validasi format PIN (harus angka)
+            if (!/^\d{3}$/.test(enteredPin)) {
+                showLoginError('PIN harus berupa angka');
+                return;
+            }
+            
+            console.info(`Validating PIN for area: ${selectedArea}`);
+            console.info(`Encoded input: ${btoa(enteredPin)}, Stored: ${encryptedAreaPins[selectedArea]}`);
+            
+            // VALIDASI DENGAN BASE64 ENCRYPTION
+            if (btoa(enteredPin) === encryptedAreaPins[selectedArea]) {
+                console.info('✅ PIN validation successful');
+                
+                // Reset attempts counter
+                resetLoginAttempts(selectedArea);
+                
+                // Mulai session
+                startSession();
+                
+                // Tampilkan sukses
+                showLoginSuccess(`Berhasil login ke Area ${selectedArea}`);
+                
+                // Proses login
+                setTimeout(() => {
+                    document.getElementById('loginModal').style.display = 'none';
+                    sessionStorage.setItem('currentArea', selectedArea);
+                    currentArea = selectedArea;
+                    clearAllTabs();
+                    showAreaSection(selectedArea);
+                    showWelcome(null);
+                    showNotification(`Selamat datang di Area ${selectedArea}`, 'success');
+                }, 1500);
+                
+            } else {
+                console.warn('❌ PIN validation failed');
+                
+                // Catat percobaan gagal
+                recordFailedAttempt(selectedArea);
+                
+                // Tampilkan error
+                showLoginError(`PIN salah untuk Area ${selectedArea}. Silakan coba lagi.`);
+                
+                // Efek visual error
+                const pinInputs = document.querySelectorAll('.pin-input');
+                pinInputs.forEach(input => {
+                    input.classList.add('error');
+                    input.value = '';
+                });
+                
+                // Hapus efek error setelah 1 detik
+                setTimeout(() => {
+                    pinInputs.forEach(input => input.classList.remove('error'));
+                    if (pinInputs[0]) {
+                        pinInputs[0].focus();
+                    }
+                }, 1000);
+            }
+        }
+
+        function showLoginError(message) {
+            document.getElementById('loginError').textContent = message;
+            document.getElementById('loginSuccess').textContent = '';
+        }
+
+        function showLoginSuccess(message) {
+            document.getElementById('loginSuccess').textContent = message;
+            document.getElementById('loginError').textContent = '';
+        }
+
+        // ===== AREA SECTION MANAGEMENT =====
+        function showAreaSection(area) {
+            const areaSections = document.getElementById('areaSections');
+            areaSections.style.display = 'block';
+            
+            // Hide Home menu item when logged in
+            const homeNavItem = document.querySelector('.nav-item[onclick*="showWelcome"]');
+            if (homeNavItem) {
+                homeNavItem.style.display = 'none';
+            }
+            
+            // Clear previous area sections
+            areaSections.innerHTML = '';
+            
+            // Create logout button first
+            const logoutSection = document.createElement('div');
+            logoutSection.className = 'nav-section';
+            logoutSection.innerHTML = `
+                <div class="nav-item" onclick="logout()" style="color: #f44336;">
+                    <svg class="nav-icon" viewBox="0 -960 960 960" fill="currentColor">
+                        <path d="M240-640h360v-80q0-50-35-85t-85-35q-50 0-85 35t-35 85h-80q0-83 58.5-141.5T480-920q83 0 141.5 58.5T680-720v80h40q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640Zm0 480h480v-400H240v400Zm240-120q33 0 56.5-23.5T560-360q0-33-23.5-56.5T480-440q-33 0-56.5 23.5T400-360q0 33 23.5 56.5T480-280ZM240-160v-400 400Z"/>
+                    </svg>
+                    <span class="nav-text">Logout</span>
+                </div>
+            `;
+            
+            // Create new area section
+            const section = document.createElement('div');
+            section.className = 'nav-section';
+            
+            // Add title
+            const title = document.createElement('div');
+            title.className = 'nav-section-title';
+            title.textContent = `AREA ${area}`;
+            section.appendChild(title);
+            
+            // Add menu items
+            areaData[area].items.forEach(item => {
+                const navItem = document.createElement('div');
+                navItem.className = 'nav-item';
+                navItem.onclick = function() { 
+                    addNewTab(item.url, item.name, this);
+                };
+                
+                // Add icon based on item type
+                let iconPath = '';
+                switch(item.icon) {
+                    case 'analytics':
+                        iconPath = '<path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>';
+                        break;
+                    case 'sales':
+                        iconPath = '<path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>';
+                        break;
+                    case 'reports':
+                        iconPath = '<path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>';
+                        break;
+                }
+                
+                navItem.innerHTML = `
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor">
+                        ${iconPath}
+                    </svg>
+                    <span class="nav-text">${item.name}</span>
+                `;
+                
+                section.appendChild(navItem);
+            });
+            
+            areaSections.appendChild(section);
+            areaSections.appendChild(logoutSection);
+            
+            // Update user info
+            document.getElementById('userName').textContent = `Area ${area}`;
+            document.getElementById('userEmail').textContent = 'Logged In';
+            document.getElementById('userAvatar').textContent = area.charAt(0);
+            
+            console.info(`Area section shown for: ${area}`);
+        }
+
+        function logout() {
+            console.info('Logging out...');
+            
+            // Clear session
+            sessionStorage.removeItem('currentArea');
+            currentArea = null;
+            selectedArea = null;
+            
+            // End session
+            endSession();
+            
+            // Clear login attempts
+            loginAttempts = {};
+            
+            // Hide area sections
+            document.getElementById('areaSections').style.display = 'none';
+            
+            // Show Home menu item again
+            const homeNavItem = document.querySelector('.nav-item[onclick*="showWelcome"]');
+            if (homeNavItem) {
+                homeNavItem.style.display = 'flex';
+                setActiveNavItem(homeNavItem);
+            }
+            
+            // Clear all tabs and create new default tab
+            clearAllTabs();
+            
+            // Reset user info
+            document.getElementById('userName').textContent = 'User';
+            document.getElementById('userEmail').textContent = 'Ready to login';
+            document.getElementById('userAvatar').textContent = '🐻';
+            
+            // Go back to welcome screen
+            showWelcome(homeNavItem);
+            
+            showNotification('Berhasil logout', 'info');
+        }
+
+        // Helper function to clear all tabs
+        function clearAllTabs() {
+            const tabBar = document.getElementById('tabBar');
+            const contentArea = document.querySelector('.content-area');
+            
+            // Remove all existing tabs
+            const existingTabs = tabBar.querySelectorAll('.tab');
+            existingTabs.forEach(tab => tab.remove());
+            
+            // Remove all existing content
+            const existingContent = contentArea.querySelectorAll('.welcome-screen, .content-iframe');
+            existingContent.forEach(content => content.remove());
+            
+            // Reset tab system
+            tabs = [];
+            activeTabId = 0;
+            nextTabId = 1;
+            
+            // Create new default tab
+            tabs.push({
+                id: 0,
+                url: '',
+                title: 'New Tab',
+                isHomePage: true,
+                history: [],
+                historyIndex: -1
+            });
+            
+            const newTabBtn = tabBar.querySelector('.new-tab-btn');
+            const defaultTab = document.createElement('div');
+            defaultTab.className = 'tab active';
+            defaultTab.setAttribute('data-tab-id', '0');
+            defaultTab.innerHTML = `
+                <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+                </svg>
+                <span class="tab-title">New Tab</span>
+                <button class="tab-close" onclick="closeTab(event, this)">×</button>
+            `;
+            defaultTab.onclick = function() { switchTab(this); };
+            
+            tabBar.insertBefore(defaultTab, newTabBtn);
+            
+            // Create welcome screen for default tab
+            const welcomeScreen = document.createElement('div');
+            welcomeScreen.className = 'welcome-screen';
+            welcomeScreen.id = 'welcomeScreen-0';
+            welcomeScreen.style.display = 'flex';
+            welcomeScreen.innerHTML = `
+                <h1 class="welcome-title">💗 بِسْمِ اللهِ 💗</h1>
+                <p class="welcome-subtitle">Awali segala aktifitasmu dengan mengucapkan bismillah</p>
+                
+                <div class="quick-access">
+                    <div class="quick-tile" onclick="showLogin()">
+                        <div class="quick-tile-icon">🔐</div>
+                        <div class="quick-tile-title">Login Area</div>
+                        <div class="quick-tile-desc">Akses Dashboard Regional</div>
+                    </div>
+                </div>
+            `;
+            
+            contentArea.appendChild(welcomeScreen);
+        }
+
+        // Sidebar toggle
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('collapsed');
+        }
+
+        // Tab management dengan sistem terpisah
+        function addNewTab(url = '', title = 'New Tab', navItem = null) {
+            const tabBar = document.getElementById('tabBar');
+            const contentArea = document.querySelector('.content-area');
+            const newTabBtn = tabBar.querySelector('.new-tab-btn');
+            
+            const tabId = nextTabId++;
+            
+            // Add to tabs array
+            tabs.push({
+                id: tabId,
+                url: url,
+                title: title,
+                isHomePage: !url,
+                history: url ? [{ url, title, timestamp: Date.now() }] : [],
+                historyIndex: url ? 0 : -1
+            });
+            
+            // Create new tab element
+            const tab = document.createElement('div');
+            tab.className = 'tab';
+            tab.setAttribute('data-tab-id', tabId);
+            tab.innerHTML = `
+                <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                <span class="tab-title">${title}</span>
+                <button class="tab-close" onclick="closeTab(event, this)">×</button>
+            `;
+            tab.onclick = function() { switchTab(this); };
+            
+            tabBar.insertBefore(tab, newTabBtn);
+            
+            // Create content for this tab
+            if (url) {
+                // Create iframe for URL
+                const iframe = document.createElement('iframe');
+                iframe.className = 'content-iframe';
+                iframe.id = `iframe-${tabId}`;
+                iframe.style.display = 'none';
+                iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
+                
+                // Gunakan proxy untuk menghindari masalah X-Frame-Options
+                iframe.src = getProxyUrl(url);
+                contentArea.appendChild(iframe);
+            } else {
+                // Create welcome screen for empty tab
+                const welcomeScreen = document.createElement('div');
+                welcomeScreen.className = 'welcome-screen';
+                welcomeScreen.id = `welcomeScreen-${tabId}`;
+                welcomeScreen.style.display = 'none';
+                welcomeScreen.innerHTML = `
+                    <h1 class="welcome-title">💗 بِسْمِ اللهِ 💗</h1>
+                    <p class="welcome-subtitle">Awali segala aktifitasmu dengan mengucapkan bismillah</p>
+                    
+                    <div class="quick-access">
+                        <div class="quick-tile" onclick="showLogin()">
+                            <div class="quick-tile-icon">🔐</div>
+                            <div class="quick-tile-title">Login Area</div>
+                            <div class="quick-tile-desc">Akses Dashboard Regional</div>
+                        </div>
+                    </div>
+                `;
+                contentArea.appendChild(welcomeScreen);
+            }
+            
+            // Switch to new tab
+            switchTab(tab);
+            
+            // Update nav item
+            if (navItem) {
+                setActiveNavItem(navItem);
+            }
+            
+            // Update URL bar
+            updateUrlBar();
+        }
+
+        // Fungsi untuk mendapatkan URL proxy untuk menghindari masalah X-Frame-Options
+        function getProxyUrl(url) {
+            // Jika URL adalah Google Apps Script, gunakan proxy
+            if (url.includes('script.google.com')) {
+                // Gunakan CORS proxy untuk menghindari masalah X-Frame-Options
+                return `https://corsproxy.io/?${encodeURIComponent(url)}`;
+            }
+            return url;
+        }
+
+        function switchTab(tabElement) {
+            const tabId = parseInt(tabElement.getAttribute('data-tab-id'));
+            
+            // Update active tab
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            tabElement.classList.add('active');
+            activeTabId = tabId;
+            
+            // Hide all content
+            document.querySelectorAll('.content-iframe, .welcome-screen').forEach(content => {
+                content.style.display = 'none';
+            });
+            
+            // Show content for active tab
+            const tab = tabs.find(t => t.id === tabId);
+            if (tab.isHomePage) {
+                const welcomeScreen = document.getElementById(`welcomeScreen-${tabId}`);
+                if (welcomeScreen) {
+                    welcomeScreen.style.display = 'flex';
+                }
+            } else {
+                const iframe = document.getElementById(`iframe-${tabId}`);
+                if (iframe) {
+                    iframe.style.display = 'block';
+                }
+            }
+            
+            updateUrlBar();
+            updateNavigationButtons();
+        }
+
+        function closeTab(event, button) {
+            event.stopPropagation();
+            const tab = button.parentElement;
+            const tabId = parseInt(tab.getAttribute('data-tab-id'));
+            const tabBar = document.getElementById('tabBar');
+            
+            if (tabBar.querySelectorAll('.tab').length > 1) {
+                // Remove from tabs array
+                tabs = tabs.filter(t => t.id !== tabId);
+                
+                // Remove content
+                const iframe = document.getElementById(`iframe-${tabId}`);
+                const welcomeScreen = document.getElementById(`welcomeScreen-${tabId}`);
+                if (iframe) iframe.remove();
+                if (welcomeScreen) welcomeScreen.remove();
+                
+                // Remove tab element
+                tab.remove();
+                
+                // If this was the active tab, activate another tab
+                if (tab.classList.contains('active')) {
+                    const firstTab = tabBar.querySelector('.tab');
+                    if (firstTab) {
+                        switchTab(firstTab);
+                    }
+                }
+            }
+        }
+
+        // Navigation dengan history per tab
+        function navigateTo(url, hideUrl = false, displayName = '') {
+            const tab = tabs.find(t => t.id === activeTabId);
+            if (!tab) return;
+            
+            const loadingBar = document.getElementById('loadingBar');
+            
+            // Update tab data
+            tab.url = url;
+            tab.title = displayName || url;
+            tab.isHomePage = false;
+            
+            // Add to tab history
+            addToTabHistory(activeTabId, url, displayName || url);
+            
+            // Hide welcome screen if exists
+            const welcomeScreen = document.getElementById(`welcomeScreen-${activeTabId}`);
+            if (welcomeScreen) {
+                welcomeScreen.style.display = 'none';
+            }
+            
+            // Get or create iframe for this tab
+            let iframe = document.getElementById(`iframe-${activeTabId}`);
+            if (!iframe) {
+                iframe = document.createElement('iframe');
+                iframe.className = 'content-iframe';
+                iframe.id = `iframe-${activeTabId}`;
+                iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
+                document.querySelector('.content-area').appendChild(iframe);
+            }
+            
+            iframe.style.display = 'block';
+            
+            loadingBar.classList.add('active');
+            
+            // Load the URL in iframe
+            try {
+                iframe.src = getProxyUrl(url);
+                
+                // Update tab title
+                const tabElement = document.querySelector(`[data-tab-id="${activeTabId}"]`);
+                if (tabElement) {
+                    const titleElement = tabElement.querySelector('.tab-title');
+                    titleElement.textContent = displayName || 'Loading...';
+                }
+                
+                // Hide loading bar after iframe loads
+                iframe.onload = function() {
+                    loadingBar.classList.remove('active');
+                };
+                
+                // Handle load error
+                iframe.onerror = function() {
+                    loadingBar.classList.remove('active');
+                    showNotification('Failed to load page', 'error');
+                };
+                
+                // Timeout fallback
+                setTimeout(() => {
+                    loadingBar.classList.remove('active');
+                }, 5000);
+                
+            } catch (error) {
+                loadingBar.classList.remove('active');
+                showNotification('Error loading page', 'error');
+            }
+            
+            updateUrlBar();
+        }
+
+        function showWelcome(navItem) {
+            const tab = tabs.find(t => t.id === activeTabId);
+            if (!tab) return;
+            
+            // Hide iframe for this tab
+            const iframe = document.getElementById(`iframe-${activeTabId}`);
+            if (iframe) {
+                iframe.style.display = 'none';
+            }
+            
+            // Show welcome screen for this tab
+            const welcomeScreen = document.getElementById(`welcomeScreen-${activeTabId}`);
+            if (welcomeScreen) {
+                welcomeScreen.style.display = 'flex';
+            }
+            
+            // Update tab data
+            tab.isHomePage = true;
+            tab.url = '';
+            
+            updateUrlBar();
+            
+            if (navItem) {
+                setActiveNavItem(navItem);
+            }
+        }
+
+        function setActiveNavItem(item) {
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+        }
+
+        // History management per tab
+        function addToTabHistory(tabId, url, title) {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return;
+            
+            const historyItem = { url, title, timestamp: Date.now() };
+            
+            // Remove any items after current index (for new navigation after going back)
+            tab.history = tab.history.slice(0, tab.historyIndex + 1);
+            
+            // Add new item
+            tab.history.push(historyItem);
+            tab.historyIndex = tab.history.length - 1;
+            
+            // Limit history size
+            if (tab.history.length > 50) {
+                tab.history.shift();
+                tab.historyIndex--;
+            }
+            
+            updateNavigationButtons();
+        }
+
+        function updateNavigationButtons() {
+            const tab = tabs.find(t => t.id === activeTabId);
+            const backBtn = document.querySelector('.nav-btn[onclick="goBack()"]');
+            const forwardBtn = document.querySelector('.nav-btn[onclick="goForward()"]');
+            
+            if (tab) {
+                backBtn.disabled = tab.historyIndex <= 0;
+                forwardBtn.disabled = tab.historyIndex >= tab.history.length - 1;
+            } else {
+                backBtn.disabled = true;
+                forwardBtn.disabled = true;
+            }
+        }
+
+        function updateUrlBar() {
+            const tab = tabs.find(t => t.id === activeTabId);
             const urlBar = document.getElementById('urlBar');
+            
+            if (tab) {
+                if (tab.isHomePage) {
+                    urlBar.value = '';
+                } else if (tab.url && tab.url.includes('script.google.com')) {
+                    urlBar.value = tab.title || 'Dashboard Internal';
+                } else {
+                    urlBar.value = tab.url || '';
+                }
+            }
+        }
+
+        // Browser controls per tab
+        function goBack() {
+            const tab = tabs.find(t => t.id === activeTabId);
+            if (!tab || tab.historyIndex <= 0) return;
+            
+            tab.historyIndex--;
+            const historyItem = tab.history[tab.historyIndex];
+            
+            const iframe = document.getElementById(`iframe-${activeTabId}`);
+            if (iframe) {
+                iframe.src = getProxyUrl(historyItem.url);
+                tab.url = historyItem.url;
+                tab.title = historyItem.title;
+                updateUrlBar();
+            }
+            
+            updateNavigationButtons();
+        }
+
+        function goForward() {
+            const tab = tabs.find(t => t.id === activeTabId);
+            if (!tab || tab.historyIndex >= tab.history.length - 1) return;
+            
+            tab.historyIndex++;
+            const historyItem = tab.history[tab.historyIndex];
+            
+            const iframe = document.getElementById(`iframe-${activeTabId}`);
+            if (iframe) {
+                iframe.src = getProxyUrl(historyItem.url);
+                tab.url = historyItem.url;
+                tab.title = historyItem.title;
+                updateUrlBar();
+            }
+            
+            updateNavigationButtons();
+        }
+
+        function refreshPage() {
+            const tab = tabs.find(t => t.id === activeTabId);
+            if (!tab || tab.isHomePage) return;
+            
+            const iframe = document.getElementById(`iframe-${activeTabId}`);
+            if (iframe) {
+                const currentSrc = iframe.src;
+                iframe.src = '';
+                setTimeout(() => {
+                    iframe.src = currentSrc;
+                    showNotification('Page refreshed', 'success');
+                }, 100);
+            }
+        }
+
+        // URL bar functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlBar = document.getElementById('urlBar');
+            
             if (urlBar) {
-                urlBar.focus();
-                urlBar.select();
+                urlBar.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        const url = this.value.trim();
+                        if (url) {
+                            let fullUrl = url;
+                            
+                            // Add protocol if missing
+                            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                                // Check if it looks like a URL
+                                if (url.includes('.') && !url.includes(' ')) {
+                                    fullUrl = 'https://' + url;
+                                } else {
+                                    // Treat as search query
+                                    fullUrl = `https://www.google.com/search?q=${encodeURIComponent(url)}`;
+                                }
+                            }
+                            
+                            navigateTo(fullUrl, false, url);
+                            this.blur();
+                        }
+                    }
+                });
+
+                // Focus URL bar on click
+                urlBar.addEventListener('focus', function() {
+                    this.select();
+                });
             }
+        });
+
+        // Notifications
+        function showNotification(message, type = 'info') {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                background: ${
+                    type === 'success' ? '#4CAF50' : 
+                    type === 'error' ? '#f44336' : 
+                    type === 'warning' ? '#ff9800' :
+                    '#2196F3'
+                };
+                color: white;
+                border-radius: 10px;
+                box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+                z-index: 10001;
+                animation: slideIn 0.3s ease;
+                max-width: 300px;
+                font-size: 14px;
+                font-weight: 500;
+            `;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
         }
 
-        // Escape: Close login modal
-        if (e.key === 'Escape') {
-            const loginModal = document.getElementById('loginModal');
-            if (loginModal && loginModal.style.display === 'flex') {
-                loginModal.style.display = 'none';
+        // Keyboard shortcuts
+        function setupKeyboardShortcuts() {
+            document.addEventListener('keydown', function(e) {
+                // Ctrl+T: New tab
+                if (e.ctrlKey && e.key === 't') {
+                    e.preventDefault();
+                    addNewTab();
+                }
+                
+                // Ctrl+W: Close tab
+                if (e.ctrlKey && e.key === 'w') {
+                    e.preventDefault();
+                    const activeTab = document.querySelector('.tab.active');
+                    if (activeTab) {
+                        const closeBtn = activeTab.querySelector('.tab-close');
+                        closeBtn.click();
+                    }
+                }
+                
+                // F5: Refresh
+                if (e.key === 'F5') {
+                    e.preventDefault();
+                    refreshPage();
+                }
+                
+                // Ctrl+L: Focus URL bar
+                if (e.ctrlKey && e.key === 'l') {
+                    e.preventDefault();
+                    const urlBar = document.getElementById('urlBar');
+                    if (urlBar) {
+                        urlBar.focus();
+                        urlBar.select();
+                    }
+                }
+
+                // Escape: Close login modal
+                if (e.key === 'Escape') {
+                    const loginModal = document.getElementById('loginModal');
+                    if (loginModal && loginModal.style.display === 'flex') {
+                        loginModal.style.display = 'none';
+                    }
+                }
+
+                // Enter in PIN input: Submit
+                if (e.key === 'Enter' && document.getElementById('loginModal') && document.getElementById('loginModal').style.display === 'flex') {
+                    validatePin();
+                }
+
+                // Alt+Left: Go back
+                if (e.altKey && e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    goBack();
+                }
+
+                // Alt+Right: Go forward
+                if (e.altKey && e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    goForward();
+                }
+
+                // Ctrl+R: Refresh
+                if (e.ctrlKey && e.key === 'r') {
+                    e.preventDefault();
+                    refreshPage();
+                }
+
+                // Ctrl+Shift+I: Toggle sidebar
+                if (e.ctrlKey && e.shiftKey && e.key === 'I') {
+                    e.preventDefault();
+                    toggleSidebar();
+                }
+
+                // Ctrl+H: Toggle Top Bar
+                if (e.ctrlKey && e.key === 'h') {
+                    e.preventDefault();
+                    toggleTopBar();
+                }
+            });
+        }
+
+        // Initialize navigation buttons state
+        updateNavigationButtons();
+
+        // Auto-save area selection
+        window.addEventListener('beforeunload', function() {
+            if (currentArea) {
+                sessionStorage.setItem('currentArea', currentArea);
             }
-        }
-
-        // Enter in PIN input: Submit
-        if (e.key === 'Enter' && document.getElementById('loginModal') && document.getElementById('loginModal').style.display === 'flex') {
-            validatePin();
-        }
-
-        // Alt+Left: Go back
-        if (e.altKey && e.key === 'ArrowLeft') {
-            e.preventDefault();
-            goBack();
-        }
-
-        // Alt+Right: Go forward
-        if (e.altKey && e.key === 'ArrowRight') {
-            e.preventDefault();
-            goForward();
-        }
-
-        // Ctrl+R: Refresh
-        if (e.ctrlKey && e.key === 'r') {
-            e.preventDefault();
-            refreshPage();
-        }
-
-        // Ctrl+Shift+I: Toggle sidebar
-        if (e.ctrlKey && e.shiftKey && e.key === 'I') {
-            e.preventDefault();
-            toggleSidebar();
-        }
-
-        // Ctrl+H: Toggle Top Bar
-        if (e.ctrlKey && e.key === 'h') {
-            e.preventDefault();
-            toggleTopBar();
-        }
-    });
-}
-
-// Initialize navigation buttons state
-updateNavigationButtons();
-
-// Auto-save area selection
-window.addEventListener('beforeunload', function() {
-    if (currentArea) {
-        sessionStorage.setItem('currentArea', currentArea);
-    }
-});
+        });
 
     </script>
 </body>
 </html>
+
 
 
 
